@@ -129,24 +129,28 @@ source venv/bin/activate         # venv\Scripts\activate on Windows
 pip install -r requirements.txt
 ```
 
-### 1. Bring up your local broker (Docker + TLS)
+### 1. Set up local broker (Docker + TLS)
 ```bash
 bash broker-config/generate_local_certs.sh
 mosquitto_passwd -c broker-config/mosquitto/passwd dev_publisher #see note below
-docker run -it -p 8883:8883 \
-  -v "$(pwd)/broker-config/mosquitto:/mosquitto/config" \
-  eclipse-mosquitto
 ```
 (Note: If you don't have `mosquitto_passwd` locally? Run it inside the same Docker image:
 `docker run --rm -it -v "$(pwd)/broker-config/mosquitto:/mosquitto/config" --entrypoint mosquitto_passwd eclipse-mosquitto -c /mosquitto/config/passwd dev_publisher`)
 
-### 2. Export the password you just set
+### 2. Run MQTT broker
+```bash
+docker run -it -p 8883:8883 \
+  -v "$(pwd)/broker-config/mosquitto:/mosquitto/config" \
+  eclipse-mosquitto
+```
+
+### 3. Export the password you set
 ```bash
 export TUKZIE_LOCAL_MQTT_PASSWORD="whatever you typed into mosquitto_passwd"
 #in every subsequent terminal
 ```
 
-### 3. Start the pieces (each in its own terminal, from the repo root)
+### 4. Start the pieces (each in its own terminal, from the repo root)
 ```bash
 python3 -m gateway.mock_ack_responder      # stands in for the real control rig
 python3 -m gateway.sensor_simulator        # fakes STM telemetry 
