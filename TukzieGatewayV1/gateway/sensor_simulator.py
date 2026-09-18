@@ -47,7 +47,7 @@ PUBLISH_INTERVAL_SECONDS = 1.0
 # link scoring/switching yet, that's gateway/adaptive_scoring.py, saved
 # for Version 2. If you don't yet have Hostinger credentials, comment
 # out "hostinger_tukzie" here and only local_docker will be used.
-TARGET_PROFILES = ["local_docker", "hostinger_tukzie"]
+TARGET_PROFILES = ["local_docker"]#, "hostinger_tukzie"]
 
 
 def read_from_stm(elapsed: float) -> TelemetryPacket:

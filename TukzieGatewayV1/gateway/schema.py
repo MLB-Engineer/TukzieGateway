@@ -44,6 +44,13 @@ class TelemetryPacket:
     #If you expect them to always exist but sometimes be empty, you’d use str = "" instead. 
     #If you expect them to sometimes be missing entirely, Optional[str] = None is the right choice.
 
+    @classmethod
+    def from_dict(cls, raw: dict) -> "TelemetryPacket":
+        return cls(**raw)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
 @dataclass
 class CommandPacket:
     """A single command sent over the commands topic...
