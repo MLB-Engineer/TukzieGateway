@@ -134,31 +134,28 @@ pip install -r requirements.txt
 ### 1. Bring up your local broker (Docker + TLS)
 ```bash
 bash broker-config/generate_local_certs.sh
-mkdir -p broker-config/mosquitto/certs   # if the script didn't already
-mosquitto_passwd -c broker-config/mosquitto/passwd dev_publisher
+mosquitto_passwd -c broker-config/mosquitto/passwd dev_publisher #see note below
 docker run -it -p 8883:8883 \
   -v "$(pwd)/broker-config/mosquitto:/mosquitto/config" \
   eclipse-mosquitto
 ```
-(Don't have `mosquitto_passwd` locally? Run it inside the same Docker image:
+(Note: If you don't have `mosquitto_passwd` locally? Run it inside the same Docker image:
 `docker run --rm -it -v "$(pwd)/broker-config/mosquitto:/mosquitto/config" --entrypoint mosquitto_passwd eclipse-mosquitto -c /mosquitto/config/passwd dev_publisher`)
 
 ### 2. Export the password you just set
 ```bash
 export TUKZIE_LOCAL_MQTT_PASSWORD="whatever you typed into mosquitto_passwd"
-# Only if you also want to dual-publish to the real Hostinger broker:
-export TUKZIE_HOSTINGER_MQTT_PASSWORD="..."   # see note below
+#in every subsequent terminal
 ```
 
 ### 3. Start the pieces (each in its own terminal, from the repo root)
 ```bash
-python -m gateway.mock_ack_responder      # stands in for the real rig
-python -m gateway.sensor_simulator        # fakes STM telemetry -> both brokers
+python3 -m gateway.mock_ack_responder      # stands in for the real control rig
+python3 -m gateway.sensor_simulator        # fakes STM telemetry 
 FLASK_APP=dashboard/app.py PYTHONPATH=. flask run
 ```
 
 Open `http://localhost:5000`, click a button, and you should see the
-command get validated, acked by the mock rig, and the dashboard update —
-end to end, no hardware required.
+command get validated, acked by the mock rig, and the dashboard update 
 
 
