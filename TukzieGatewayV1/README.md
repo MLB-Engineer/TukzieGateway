@@ -39,8 +39,7 @@ else in the pipeline changes.
 ```
 config/config.yaml           Single source of truth for broker connection
                               details (host, port, TLS, credentials, topic
-                              names) for BOTH the local_docker and
-                              hostinger_tukzie profiles. Nothing else in
+                              names) for the local_docker. Nothing else in
                               the codebase should ever hardcode a host,
                               port, or password — change it here.
 
@@ -53,9 +52,8 @@ gateway/
                               This is the single source of truth for what
                               fields a telemetry/command payload has.
                               >>> Add new sensors here first. <<<
-  sensor_simulator.py         NEW for V1. Fakes STM32 sensor readings and
-                              publishes them to BOTH brokers at once via
-                              DualBrokerPublisher. Swap `read_from_stm()`
+  sensor_simulator.py         Fakes STM32 sensor readings and
+                              publishes them. Swap `read_from_stm()`
                               for a real serial/USB read once hardware
                               exists — nothing else changes.
   command_validation.py       Validates incoming commands: schema check,
@@ -77,7 +75,7 @@ gateway/
   dead_letter.py                Quarantines malformed telemetry instead of
                               silently dropping it — republishes it (with
                               a reason) to tukzie/telemetry/rejected.
-  adaptive_scoring.py           V2 only, not wired in yet. Scores the 3 USB
+  adaptive_scoring.py         Not wired in yet. Scores the 3 USB
                               dongles (signal/latency/loss) and picks the
                               best one with hysteresis, so links don't
                               flap. Fully implemented — just not called
