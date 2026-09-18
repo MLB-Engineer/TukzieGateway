@@ -9,9 +9,9 @@ and the MQTT broker. It has three jobs:
 3. Publish telemetry to MQTT broker.
 
 ## Version 1
--Entirely laptop-based 
--Sensor data is *simulated* in software. Local Mosquitto broker (Docker)
--Command validation + mock ack responder + dashboard, all wired together
+Entirely laptop-based |
+Sensor data is *simulated* in software. Local Mosquitto broker (Docker) |
+Command validation + mock ack responder + dashboard, all wired together
 
 **Version 1 deliberately skips:** real hardware (STM32/USB dongles) and
 adaptive network switching. Everything is built so that swapping in real
@@ -22,7 +22,7 @@ else in the pipeline changes.
 
 ```
 [gateway/sensor_simulator.py]  --publishes telemetry-->  [local Mosquitto : Docker, your laptop]
-        (fakes STM data)                            \--->  [Hostinger broker : broker.tukzie.com]  (optional, if you have creds)
+        (fakes STM data)                            
 
 [dashboard/app.py + templates/index.html]  --publishes command-->  tukzie/commands
         (Flask control UI, buttons)                 <--reads ack--   tukzie/acks
