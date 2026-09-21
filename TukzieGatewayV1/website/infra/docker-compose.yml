@@ -1,0 +1,49 @@
+# Local-only InfluxDB + Telegraf stack.
+#
+# This does NOT include Mosquitto — you already have that running from
+# the repo root (see ../../broker-config). Telegraf here just connects
+# to it the same way any other MQTT client would, using
+# host.docker.internal so a container can reach a broker running
+# directly on your laptop (not in Docker).
+#
+# Run from this folder:
+#   docker compose --env-file .env up -d
+#
+# See .env.example for the values to copy into your own .env (never
+# commit the real .env).
+
+services:
+  influxdb:
+    image: influxdb:2.7
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_ADMIN_USER}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_ADMIN_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+
+  telegraf:
+    image: telegraf:1.30
+    depends_on:
+      - influxdb
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - ../../broker-config/mosquitto/certs/ca.crt:/etc/telegraf/ca.crt:ro
+    environment:
+      MQTT_HOST: ${MQTT_HOST}
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets the container reach your laptop's Mosquitto
+
+volumes:
+  influxdb-data:
