@@ -11,6 +11,12 @@
 # One-time setup (run once, before the first `docker compose up`):
 #   docker network create tukzie-net   [if it doesn't already exist — compose creates it automatically now, see `networks:` below, so this step is no longer required, kept here as a note]
 #   cp .env.example .env               (fill in real values)
+#   touch broker-config/mosquitto/passwd   (must exist before mosquitto
+#                                            will even start — its config
+#                                            points password_file at this
+#                                            path, and it fails to boot,
+#                                            not just fails auth, if the
+#                                            file is missing)
 #   docker compose up -d mosquitto     (start only the broker first)
 #   docker compose exec mosquitto mosquitto_passwd -c /mosquitto/config/passwd dev_publisher
 #     (enter the same password as MQTT_PASSWORD in your .env)
@@ -92,9 +98,10 @@ services:
       INFLUX_TOKEN: ${INFLUX_TOKEN}
       INFLUX_ORG: ${INFLUX_ORG}
       INFLUX_BUCKET: ${INFLUX_BUCKET}
+      TUKZIE_DB_PATH: /app/data/users.db
     volumes:
       - ./broker-config/mosquitto/certs/ca.crt:/certs/ca.crt:ro
-      - website-users-db:/app/users.db   # keeps accounts across rebuilds
+      - website-users-db:/app/data   # a directory mount, not a file — keeps accounts across rebuilds
     networks:
       - tukzie-net
     restart: unless-stopped
