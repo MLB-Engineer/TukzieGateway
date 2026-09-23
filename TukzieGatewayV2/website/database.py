@@ -1,9 +1,17 @@
+import os
 import sqlite3
 from pathlib import Path
 
 import bcrypt
 
-DB_FILE = Path(__file__).resolve().parent / "users.db"
+# Configurable so a Docker named volume can be mounted at a directory
+# (volumes are directories, not files — mounting one directly onto a
+# single file path like the old DB_FILE made Docker create an empty
+# *directory* there instead, since users.db doesn't exist in the built
+# image, which broke sqlite3.connect with "unable to open database
+# file"). Defaults to website/ itself when running outside Docker.
+DB_FILE = Path(os.getenv("TUKZIE_DB_PATH", str(Path(__file__).resolve().parent / "users.db")))
+DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_USERS = [
     # Regenerated correct bcrypt hashes — the previous defaults (from the
