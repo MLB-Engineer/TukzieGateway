@@ -1,0 +1,16 @@
+<configuration>
+    <input>
+        <net-file value="uct_cbd.net.xml"/>
+        <route-files value="uct_cbd.rou.xml"/>
+    </input>
+
+    <output>
+        <fcd-output value="trace.xml"/>
+        <fcd-output.geo value="false"/>
+    </output>
+
+    <time>
+        <begin value="0"/>
+        <end value="3600"/>
+    </time>
+</configuration>
