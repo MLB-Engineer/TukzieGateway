@@ -1,0 +1,53 @@
+
+====================================================
+ AUTOMATED NETWORK-SELECTION EXPERIMENTS
+====================================================
+
+Checking SUMO trace and generating common baseline metrics...
+Parsing SUMO trace.xml file via direct stream reader...
+Successfully parsed 500 time steps from SUMO trace.
+
+[1/6] Comparing selection algorithms...
+  SAW              | handovers= 82 | agreement= 83.20% | throughput=   88.27 Mbps
+  TOPSIS           | handovers= 71 | agreement= 87.00% | throughput=   93.33 Mbps
+  Throughput       | handovers=116 | agreement= 93.40% | throughput=  124.73 Mbps
+  Latency          | handovers=  0 | agreement=100.00% | throughput=   27.32 Mbps
+  PacketLoss       | handovers=  1 | agreement= 99.80% | throughput=  100.20 Mbps
+  SignalStrength   | handovers= 39 | agreement= 84.00% | throughput=   79.03 Mbps
+
+[2/6] Hysteresis sweep across all algorithms...
+
+[3/6] Weight-profile sensitivity for SAW/TOPSIS...
+
+[4/6] Random-weight sensitivity...
+  SAW random-weight runs complete.
+  TOPSIS random-weight runs complete.
+
+[5/6] Cost sensitivity...
+
+[6/6] Random-seed robustness...
+
+Calculating random-seed summary statistics...
+
+====================================================
+ EXPERIMENTS COMPLETE
+ Results saved to:
+ C:\EEE4022S\Simulation\SimV2\experiment_results
+====================================================
+
+
+ans = 
+
+  struct with fields:
+
+    algorithmComparison: [6×19 table]
+             hysteresis: [66×10 table]
+      weightSensitivity: [14×19 table]
+          randomWeights: [200×14 table]
+        costSensitivity: [6×11 table]
+            randomSeeds: [60×11 table]
+      randomSeedSummary: [6×13 table]
+        performanceCost: [6×7 table]
+               baseline: [1×1 struct]
+
+>> 
