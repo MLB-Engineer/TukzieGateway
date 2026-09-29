@@ -1,0 +1,38 @@
+# ESP32 + Raspberry Pi UAR Control System
+
+This project demonstrates how to control a buzzer, LEDs, and an OLED display connected to an ESP32 via UART commands sent from a Raspberry Pi (or any serial terminal).
+
+---
+
+## 📖 Usage Instructions
+
+### 1. Open Serial Monitor / Terminal
+- Use the **Arduino IDE Serial Monitor**
+- Configure the connection:
+  - **Baud rate:** `115200`
+  - **Line ending:** `Newline (\n)`
+
+### 2. Send Commands
+Type and send any of the following commands:
+
+- `BUZZER_ON`  
+  → Activates the buzzer.
+
+- `LEFT_LED_FLASH`  
+  → Flashes the left LED.
+
+- `RIGHT_LED_FLASH`  
+  → Flashes the right LED.
+
+- `BOTH_LED_FLASH`  
+  → Flashes both LEDs simultaneously.
+
+- `OLED_TEXT:Hello Pi!`  
+  → Displays the text `Hello Pi!` on the OLED screen.
+
+---
+
+## 🔧 Notes
+- Ensure wiring between Raspberry Pi and ESP32 UART pins is correct (TX ↔ RX, RX ↔ TX, and common GND).
+- The ESP32 will send back acknowledgment messages confirming the action taken.
+- OLED text remains displayed until a new `OLED_TEXT:<message>` command is sent.
