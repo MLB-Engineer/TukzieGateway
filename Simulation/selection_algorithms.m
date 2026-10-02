@@ -1,4 +1,4 @@
-function [selectedNet, scores, diagnostics] = selection_algorithms(metrics, currentNet, cfg)
+function [selectedNet, scores, diagnostics] = selection_algorithms(metrics, currentNet, cfg, available)
 % Implements the network-selection methods used by NetworkSim2.
 %
 % Metrics columns:
@@ -19,6 +19,16 @@ function [selectedNet, scores, diagnostics] = selection_algorithms(metrics, curr
 method = lower(string(cfg.algorithm));
 weights = cfg.weights(:);
 
+if nargin < 4 || isempty(available)
+    available = true(size(metrics,1),1);
+else
+    available = logical(available(:));
+    if numel(available) ~= size(metrics,1)
+        error('available must contain one logical value per network.');
+    end
+end
+
+
 if numel(weights) ~= 5 || abs(sum(weights)-1) > 1e-10
     error('cfg.weights must contain 5 values summing to 1.');
 end
@@ -30,6 +40,7 @@ switch method
     case "saw"
         normMatrix = minmax_normalize(metrics, cfg.criteriaBounds, isCost);
         scores = normMatrix * weights;
+        scores(~available) = -Inf;
         [bestScore,bestNet] = max(scores);
         selectedNet = apply_score_hysteresis(bestNet, bestScore, scores, currentNet, cfg.hysteresis);
         if selectedNet < 1 || selectedNet > numel(scores)
@@ -37,10 +48,11 @@ switch method
         end
         diagnostics.methodScore = scores;
         diagnostics.normalizedMatrix = normMatrix;
-        diagnostics.thresholdPassed = true(size(scores));
+        diagnostics.thresholdPassed = available;
 
     case "topsis"
         [scores, normMatrix] = topsis_scores(metrics, weights, isCost);
+        scores(~available) = -Inf;
         [bestScore, bestNet] = max(scores);
         selectedNet = apply_score_hysteresis(bestNet, bestScore, scores, currentNet, cfg.hysteresis);
         if selectedNet < 1 || selectedNet > numel(scores)
@@ -48,7 +60,7 @@ switch method
         end
         diagnostics.methodScore = scores;
         diagnostics.normalizedMatrix = normMatrix;
-        diagnostics.thresholdPassed = true(size(scores));
+        diagnostics.thresholdPassed = available;
 
     case {"throughput", "latency", "packetloss", "signalstrength"}
         [criterionIndex, thresholdValue] = single_criterion_config(method, cfg);
@@ -62,10 +74,13 @@ switch method
             normScores = normalize_single(raw, criterionIndex, cfg.criteriaBounds, true);
         end
 
+        passed = passed & available;
         eligible = find(passed);
         if isempty(eligible)
             if cfg.threshold.fallbackToBest
-                [bestScore, bestNet] = max(normScores);
+                fallbackScores = normScores;
+                fallbackScores(~available) = -Inf;
+                [bestScore, bestNet] = max(fallbackScores);
             else
                 bestScore = -Inf;
                 bestNet = currentNet;
@@ -133,20 +148,6 @@ for j = 1:numCriteria
     normMatrix(:,j) = r;
 end
 end
-
-% Shift each criterion to a non-negative benefit scale. This keeps the WSM
-% weighted sum interpretable while retaining vector normalisation.
-%for j = 1:numCriteria
-    %col = normMatrix(:,j);
-    %cmin = min(col);
-    %cmax = max(col);
-    %if cmax-cmin < eps
-        %normMatrix(:,j) = ones(numNets,1);
-    %else
-        %normMatrix(:,j) = (col-cmin)/(cmax-cmin);
-    %end
-%end
-%end
 
 function [scores, normMatrix] = topsis_scores(metrics, weights, isCost)
 % Standard TOPSIS using vector-normalised decision matrix.

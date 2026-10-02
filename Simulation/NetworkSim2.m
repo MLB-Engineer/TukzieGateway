@@ -24,6 +24,17 @@ if ~isfield(cfg,'randomSeed') || isempty(cfg.randomSeed)
 end
 rng(cfg.randomSeed);
 
+% Optional network-degradation experiment settings.
+% Defaults keep the original simulation unchanged.
+if ~isfield(cfg,'degradation') || isempty(cfg.degradation)
+    cfg.degradation.enabled = false;
+    cfg.degradation.scenario = "normal";
+    cfg.degradation.targetNetworks = 1;
+    cfg.degradation.startFraction = 0.35;
+    cfg.degradation.endFraction = 0.75;
+    cfg.degradation.severity = 0.70;
+end
+
 %% === STEP 1: TEXT PARSING OF SUMO TRACE.XML ===
 if isempty(traceData)
     xmlFile = cfg.xmlFile;
@@ -48,6 +59,8 @@ if isempty(traceData)
     currentX = NaN;
     currentY = NaN;
     hasVehicleInStep = false;
+    firstVehicleID = '';
+    vehicleLocked = false;
 
     while ~feof(fid)
         lineStr = fgetl(fid);
@@ -65,8 +78,26 @@ if isempty(traceData)
         elseif contains(lineStr, '<vehicle')
             xVal = regexp(lineStr, 'x="([^"]+)"', 'tokens');
             yVal = regexp(lineStr, 'y="([^"]+)"', 'tokens');
+            idVal = regexp(lineStr, 'id="([^"]+)"', 'tokens');
 
-            if ~isempty(xVal) && ~isempty(yVal)
+            % Lock onto the first vehicle encountered in the trace file and
+            % ignore all other vehicles. This makes the mobility trajectory
+            % deterministic when the SUMO trace contains multiple vehicles.
+            if ~vehicleLocked && ~isempty(idVal)
+                firstVehicleID = idVal{1}{1};
+                vehicleLocked = true;
+            end
+
+            thisIsTrackedVehicle = false;
+            if vehicleLocked
+                thisIsTrackedVehicle = ~isempty(idVal) && strcmp(idVal{1}{1},firstVehicleID);
+            elseif ~hasVehicleInStep
+                % Fallback for a trace without vehicle IDs: first vehicle
+                % encountered in each timestep is used.
+                thisIsTrackedVehicle = true;
+            end
+
+            if thisIsTrackedVehicle && ~isempty(xVal) && ~isempty(yVal)
                 currentX = str2double(xVal{1}{1});
                 currentY = str2double(yVal{1}{1});
                 hasVehicleInStep = true;
@@ -94,7 +125,7 @@ if isempty(traceData)
     fclose(fid);
 
     % Truncate vectors dynamically to actual parsed steps
-    nSteps = 500; %stepIdx;
+    nSteps = stepIdx;
 
     if nSteps == 0
         error('Parsing failed: 0 timesteps found. Check if trace.xml contains valid <timestep> and <vehicle> nodes.');
@@ -132,24 +163,43 @@ thresholdLog = true(nSteps,4);
 
 oracleLog = zeros(nSteps,1);
 oracleScoreLog = zeros(nSteps,1);
+oracleMetricsLog = zeros(nSteps,5);
+metricOracleLog = zeros(nSteps,3);
+
 selectedScoreLog = zeros(nSteps,1);
 selectedMetricsLog = zeros(nSteps,5);
+degradationLog = ones(nSteps,4);
 
 switches = 0;
-currentNet = 1;
+% Start with no forced network so the first decision is made by the
+% selection algorithm rather than inheriting Wi-Fi by assumption.
+currentNet = 0;
 
 %% === STEP 3: MAIN EXECUTION LOOP ===
 for k = 1:nSteps
     vehPos = [xPos(k), yPos(k), 1.5];
 
     netMetrics = get_network_metrics(vehPos, time(k), cfg);
+
+    % Apply controlled degradation AFTER the common network models and
+    % BEFORE network selection. This keeps the mobility/channel model
+    % identical across algorithms while allowing controlled stress tests.
+    [netMetrics, degradationFactors] = apply_network_degradation( ...
+        netMetrics, k, nSteps, cfg);
+
+    available = true(4,1);
+    if isfield(cfg.wifi,'enforceCoverage') && cfg.wifi.enforceCoverage
+        available(1) = norm(vehPos-cfg.wifi.apPos) <= cfg.wifi.radius_m;
+    end
+
     metricsLog(k,:,:) = netMetrics.metrics;
+    degradationLog(k,:) = degradationFactors;
     distanceLog(k,:) = netMetrics.distances;
     signalLog(k,:) = netMetrics.signalQuality;
     losLog(k,:) = netMetrics.los;
 
     [nextNet, scores, diagnostics] = selection_algorithms( ...
-        netMetrics.metrics, currentNet, cfg);
+        netMetrics.metrics, currentNet, cfg, available);
 
     [oracleScore, oracleNet] = max(scores);
 
@@ -162,6 +212,14 @@ for k = 1:nSteps
     scoresLog(k,:) = scores';
     oracleLog(k) = oracleNet;
     oracleScoreLog(k) = oracleScore;
+    oracleMetricsLog(k,:) = netMetrics.metrics(oracleNet,:);
+    availableIdx = find(available);
+    [~,iiLat] = min(netMetrics.metrics(availableIdx,1));
+    [~,iiLoss] = min(netMetrics.metrics(availableIdx,2));
+    [~,iiThr] = max(netMetrics.metrics(availableIdx,3));
+    metricOracleLog(k,:) = [netMetrics.metrics(availableIdx(iiLat),1), ...
+        netMetrics.metrics(availableIdx(iiLoss),2), ...
+        netMetrics.metrics(availableIdx(iiThr),3)];
     selectedScoreLog(k) = scores(currentNet);
     selectedMetricsLog(k,:) = netMetrics.metrics(currentNet,:);
     thresholdLog(k,:) = diagnostics.thresholdPassed';
@@ -183,12 +241,16 @@ results.yPos = yPos;
 results.selectedLog = selectedLog;
 results.scoresLog = scoresLog;
 results.metricsLog = metricsLog;
+results.degradationLog = degradationLog;
+results.degradationScenario = string(cfg.degradation.scenario);
 results.distanceLog = distanceLog;
 results.signalLog = signalLog;
 results.losLog = losLog;
 results.thresholdLog = thresholdLog;
 results.oracleLog = oracleLog;
 results.oracleScoreLog = oracleScoreLog;
+results.oracleMetricsLog = oracleMetricsLog;
+results.metricOracleLog = metricOracleLog;
 results.selectedScoreLog = selectedScoreLog;
 results.selectedMetricsLog = selectedMetricsLog;
 results.meanSelectedMetrics = mean(selectedMetricsLog,1);
@@ -200,6 +262,10 @@ results.oracleMatchRate = 100*mean(selectedLog == oracleLog);
 results.switches = switches;
 results.handoverRate = handoverRate;
 results.timeOnNetwork = timeOnNetwork;
+% Modelled data cost assumes the selected throughput is fully utilised.
+% Mbps*s is converted to MB using 1 Mbps = 0.125 MB/s.
+results.modelledDataCost_R = 0.125*trapz(time, ...
+    selectedMetricsLog(:,3).*selectedMetricsLog(:,5));
 results.weights = weights;
 results.hysteresis = hysteresis;
 results.algorithm = string(cfg.algorithm);
@@ -250,6 +316,15 @@ wifi_tp = min(cfg.wifi.maxThroughput_Mbps*1e6,max(0,wifi_tp));
 
 wifi_lat = cfg.wifi.baseLatency_ms + 2*abs(randn());
 wifi_loss = min(100,max(0.01,(d_wifi/wifi_radius)^3*100));
+
+if isfield(cfg.wifi,'enforceCoverage') && cfg.wifi.enforceCoverage && d_wifi > wifi_radius
+    % Outside the configured AP coverage radius, Wi-Fi is unavailable to
+    % the selector. The selector also receives an explicit availability mask.
+    wifi_tp = 0;
+    wifi_loss = 100;
+    wifi_lat = 500;
+    wifi_rssi = -120;
+end
 
 %% 2. VODACOM 5G/LTE
 vodacom_tower = [6344,3504,30];
@@ -319,6 +394,91 @@ out.metrics = [ ...
 out.distances = [d_wifi,d_vodacom,d_mtn];
 out.signalQuality = [wifi_rssi,voda_sinr,mtn_sinr,sat_rssi];
 out.los = [vodaLOS,mtnLOS];
+end
+
+%% ========================================================================
+function [out,factors] = apply_network_degradation(in,k,nSteps,cfg)
+% APPLY_NETWORK_DEGRADATION
+% Controlled stress model used only for degradation experiments.
+%
+% Scenario definitions:
+%   normal      - no degradation
+%   gradual     - linear degradation between startFraction/endFraction
+%   abrupt      - full degradation from startFraction onward
+%   combined    - gradual degradation applied to Wi-Fi + terrestrial 5G
+%
+% The degradation magnitudes are simulation assumptions, not measured
+% network-failure statistics.
+
+out = in;
+factors = ones(1,4);
+
+if ~isfield(cfg,'degradation') || ~cfg.degradation.enabled
+    return;
+end
+
+scenario = lower(string(cfg.degradation.scenario));
+severity = max(0,min(1,cfg.degradation.severity));
+
+if ~isfield(cfg.degradation,'startFraction')
+    cfg.degradation.startFraction = 0.35;
+end
+if ~isfield(cfg.degradation,'endFraction')
+    cfg.degradation.endFraction = 0.75;
+end
+if ~isfield(cfg.degradation,'targetNetworks')
+    cfg.degradation.targetNetworks = 1;
+end
+
+startFrac = cfg.degradation.startFraction;
+endFrac = max(startFrac, cfg.degradation.endFraction);
+
+switch scenario
+    case "normal"
+        s = 0;
+
+    case "gradual"
+        progress = (k-1)/max(nSteps-1,1);
+        s = min(max((progress-startFrac)/(endFrac-startFrac),0),1);
+
+    case "abrupt"
+        progress = (k-1)/max(nSteps-1,1);
+        s = double(progress >= startFrac);
+
+    case "combined"
+        progress = (k-1)/max(nSteps-1,1);
+        s = min(max((progress-startFrac)/(endFrac-startFrac),0),1);
+
+    otherwise
+        error('Unknown degradation scenario: %s',cfg.degradation.scenario);
+end
+
+if scenario == "combined"
+    targets = [1 2 3];
+else
+    targets = cfg.degradation.targetNetworks;
+end
+
+targets = unique(targets(:).');
+targets = targets(targets >= 1 & targets <= size(out.metrics,1));
+
+if isempty(targets) || s <= 0 || severity <= 0
+    return;
+end
+
+d = severity*s;
+
+for n = targets
+    oldLoss = out.metrics(n,2);
+    out.metrics(n,1) = out.metrics(n,1) * (1 + 2*d);
+    out.metrics(n,2) = min(100, oldLoss + (50-oldLoss)*d);
+    out.metrics(n,3) = out.metrics(n,3) * max(0.05,1-d);
+    out.metrics(n,4) = out.metrics(n,4) - 20*d;
+    factors(n) = 1-d;
+end
+
+out.signalQuality = out.metrics(:,4).';
+
 end
 
 %% ========================================================================

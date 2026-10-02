@@ -30,7 +30,18 @@ cfg.threshold.throughput_Mbps = 5;
 cfg.threshold.latency_ms = 100;
 cfg.threshold.packetLoss_percent = 20;
 cfg.threshold.signalQuality_dB = -90;
-cfg.threshold.cost_R_per_MB = 0.50;
+
+% Common QoS acceptance criteria used only for experiment interpretation.
+% These are engineering study thresholds, not claimed standards.
+cfg.qosLimits.maxLatency_ms = 100;
+cfg.qosLimits.maxPacketLoss_percent = 20;
+cfg.qosLimits.minThroughput_Mbps = 5;
+
+% Rules used to select the best tested hysteresis setting.
+cfg.optimization.maxLatencyIncreaseFraction = 0.10;
+cfg.optimization.minThroughputRetentionFraction = 0.95;
+cfg.optimization.maxPacketLossIncrease_percent = 2;
+
 
 % If no network satisfies a single-criterion threshold, select the network
 % with the best value of that criterion rather than returning no network.
@@ -100,6 +111,7 @@ cfg.wifi.maxThroughput_Mbps = 200;
 cfg.wifi.spectralEfficiencyFactor = 0.55;
 cfg.wifi.baseLatency_ms = 4;
 cfg.wifi.shadowSigma_dB = 2;
+cfg.wifi.enforceCoverage = true;
 cfg.wifi.cost_R_per_MB = 0.001;      
 
 %% Satellite fallback model
