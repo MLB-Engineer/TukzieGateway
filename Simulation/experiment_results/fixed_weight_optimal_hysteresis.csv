@@ -1,3 +1,0 @@
-Algorithm,Hysteresis,QoSFeasible,QoSViolation,PingPongHandovers,Handovers,MeanLatency_ms,MeanPacketLoss_percent,MeanThroughput_Mbps,Selected
-SAW,0.1,1,0,10,32,16.6929656430283,7.20136268111447,131.335717792191,1
-TOPSIS,0.1,1,0,14,37,16.0227107858644,9.29480919254758,131.482285100508,1
