@@ -20,10 +20,11 @@ cfg.algorithm = "SAW";
 
 % Criteria order used throughout the simulation:
 % [Latency, PacketLoss, Throughput, SignalQuality, CostPerMB]
-% The values below are an initial weighting and can be swept
-% automatically in run_experiments.m.
-cfg.weights = [0.45, 0.18, 0.045, 0.225, 0.10];
-cfg.hysteresis = 0.05;
+% The default values define the supervisor-specified baseline:
+% equal weighting and zero hysteresis. run_experiments.m then tests
+% alternative weight profiles and hysteresis values.
+cfg.weights = [0.20, 0.20, 0.20, 0.20, 0.20];
+cfg.hysteresis = 0;
 
 % Single-criterion thresholds. 
 cfg.threshold.throughput_Mbps = 5;
@@ -37,10 +38,17 @@ cfg.qosLimits.maxLatency_ms = 100;
 cfg.qosLimits.maxPacketLoss_percent = 20;
 cfg.qosLimits.minThroughput_Mbps = 5;
 
-% Rules used to select the best tested hysteresis setting.
-cfg.optimization.maxLatencyIncreaseFraction = 0.10;
-cfg.optimization.minThroughputRetentionFraction = 0.95;
-cfg.optimization.maxPacketLossIncrease_percent = 2;
+% Global optimisation search grid used by run_experiments.m.
+% The reported optimum is global over this explicitly defined discrete grid.
+cfg.optimization.weightStep = 0.05;
+cfg.optimization.hysteresisStep = 0.01;
+cfg.optimization.maxHysteresis = 0.10;
+
+% Option-C QoS constraints used during optimisation. These are engineering
+% study limits, not claimed regulatory or operator standards.
+cfg.optimization.maxLatency_ms = cfg.qosLimits.maxLatency_ms;
+cfg.optimization.maxPacketLoss_percent = cfg.qosLimits.maxPacketLoss_percent;
+cfg.optimization.minThroughput_Mbps = cfg.qosLimits.minThroughput_Mbps;
 
 
 % If no network satisfies a single-criterion threshold, select the network

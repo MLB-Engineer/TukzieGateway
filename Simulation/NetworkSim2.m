@@ -262,8 +262,11 @@ results.oracleMatchRate = 100*mean(selectedLog == oracleLog);
 results.switches = switches;
 results.handoverRate = handoverRate;
 results.timeOnNetwork = timeOnNetwork;
-% Modelled data cost assumes the selected throughput is fully utilised.
-% Mbps*s is converted to MB using 1 Mbps = 0.125 MB/s.
+% Modelled data volume assumes the selected link is fully utilised at its
+% modelled throughput. Mbps is converted to MB/s using 0.125.
+results.modelledData_MB = 0.125*trapz(time,selectedMetricsLog(:,3));
+% Cost integrates throughput (MB/s) multiplied by the selected tariff
+% (R/MB) over time. This is a full-utilisation model, not measured usage.
 results.modelledDataCost_R = 0.125*trapz(time, ...
     selectedMetricsLog(:,3).*selectedMetricsLog(:,5));
 results.weights = weights;

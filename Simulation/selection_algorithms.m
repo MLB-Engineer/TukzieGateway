@@ -51,7 +51,7 @@ switch method
         diagnostics.thresholdPassed = available;
 
     case "topsis"
-        [scores, normMatrix] = topsis_scores(metrics, weights, isCost);
+        [scores, normMatrix] = topsis_scores(metrics, weights, isCost, available);
         scores(~available) = -Inf;
         [bestScore, bestNet] = max(scores);
         selectedNet = apply_score_hysteresis(bestNet, bestScore, scores, currentNet, cfg.hysteresis);
@@ -94,12 +94,15 @@ switch method
         % A network that fails the threshold is not retained merely because
         % of hysteresis. Thresholds therefore act as minimum QoS constraints;
         % hysteresis is applied only when the current network is acceptable.
-        if currentNet ~= 0 && ~passed(currentNet) && any(passed)
+        if currentNet ~= 0 && ~available(currentNet)
+            selectedNet = bestNet;
+        elseif currentNet ~= 0 && ~passed(currentNet) && any(passed)
             selectedNet = bestNet;
         else
             selectedNet = apply_score_hysteresis(bestNet, bestScore, normScores, currentNet, cfg.hysteresis);
         end
         scores = normScores;
+        scores(~available) = -Inf;
         diagnostics.methodScore = scores;
         diagnostics.normalizedMatrix = normScores;
         diagnostics.thresholdPassed = passed;
@@ -149,20 +152,35 @@ for j = 1:numCriteria
 end
 end
 
-function [scores, normMatrix] = topsis_scores(metrics, weights, isCost)
+function [scores, normMatrix] = topsis_scores(metrics, weights, isCost, available)
 % Standard TOPSIS using vector-normalised decision matrix.
+% Ideal points are calculated only from networks that are actually
+% available at the current vehicle position.
 [numNets,numCriteria] = size(metrics);
-R = zeros(numNets,numCriteria);
+available = logical(available(:));
+idx = find(available);
+
+scores = -Inf(numNets,1);
+normMatrix = zeros(numNets,numCriteria);
+
+if isempty(idx)
+    return;
+end
+
+M = metrics(idx,:);
+R = zeros(numel(idx),numCriteria);
 for j = 1:numCriteria
-    denom = sqrt(sum(metrics(:,j).^2));
+    denom = sqrt(sum(M(:,j).^2));
     if denom < eps
         R(:,j) = 0;
     else
-        R(:,j) = metrics(:,j)/denom;
+        R(:,j) = M(:,j)/denom;
     end
 end
 
 V = R .* weights';
+normMatrix(idx,:) = V;
+
 idealBest = zeros(1,numCriteria);
 idealWorst = zeros(1,numCriteria);
 for j = 1:numCriteria
@@ -177,8 +195,10 @@ end
 
 dPlus = sqrt(sum((V-idealBest).^2,2));
 dMinus = sqrt(sum((V-idealWorst).^2,2));
-scores = dMinus ./ max(dPlus+dMinus,eps);
-normMatrix = V;
+denom = dPlus+dMinus;
+localScores = dMinus ./ max(denom,eps);
+localScores(denom < eps) = 1;
+scores(idx) = localScores;
 end
 
 function scores = normalize_single(raw, index, bounds, isCost)
