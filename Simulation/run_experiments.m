@@ -1,14 +1,14 @@
-function experimentResults = run_experiments()
+function experimentResults = run_experiments(outDir)
 %RUN_EXPERIMENTS Automated investigation for the Smart Tuk-Tuk simulation.
 %
 % Experimental sequence:
 %   1. Baseline: equal weights, zero hysteresis.
-%   2. Global SAW/TOPSIS optimisation of weights + hysteresis.
+%   2. Exploratory joint optimisation; its winners are NOT adopted.
 %   3. Random-weight robustness using shared unique samples.
 %   4. Controlled network-degradation scenarios + full time series.
 %   5. Single-criterion threshold sensitivity.
 %   6. Random-seed robustness of the final SAW/TOPSIS configurations.
-%   7. Fixed-weight hysteresis optimisation and plot.
+%   7. Fixed-weight hysteresis sensitivity; investigator chooses M = 0.08.
 %
 % The optimisation is exhaustive over a defined discrete grid and therefore
 % gives a global optimum over that grid, not a claim of continuous global
@@ -22,6 +22,9 @@ function experimentResults = run_experiments()
 % NetworkSim2 is intentionally not modified by this file.
 clc;
 close all;
+if exist('generate_report_plots','file') ~= 2
+    error('Place generate_report_plots.m in this folder or on the MATLAB path.');
+end
 fprintf('\n====================================================\n');
 fprintf(' FINAL AUTOMATED NETWORK-SELECTION EXPERIMENTS\n');
 fprintf('====================================================\n\n');
@@ -40,8 +43,20 @@ baseCfg.degradation = struct( ...
     'startFraction',0.35, ...
     'endFraction',0.75, ...
     'severity',0.70);
-outDir = fullfile(pwd,'experiment_results');
+% User-selected configuration: the only settings used for final evaluation.
+chosenWeights = [0.30 0.30 0.20 0.10 0.10];
+chosenHysteresis = 0.08;
+chosenCfg = baseCfg;
+chosenCfg.weights = chosenWeights;
+chosenCfg.hysteresis = chosenHysteresis;
+if nargin < 1 || isempty(outDir)
+    outDir = fullfile(pwd,'experiment_results');
+end
+outDir = char(outDir);
 if ~exist(outDir,'dir'), mkdir(outDir); end
+% A failed/incomplete run must not leave old metadata marking it complete.
+metadataPath = fullfile(outDir,'experiment_metadata.csv');
+if isfile(metadataPath), delete(metadataPath); end
 algorithms = ["SAW","TOPSIS","Throughput","Latency","PacketLoss","SignalStrength"];
 multiCriteriaAlgorithms = ["SAW","TOPSIS"];
 %% Parse SUMO trace once
@@ -124,34 +139,41 @@ for a = 1:numel(multiCriteriaAlgorithms)
         best.weights(1),best.weights(2),best.weights(3),best.weights(4),best.weights(5), ...
         best.hysteresis,best.feasible,best.pingPong,best.handovers);
 end
-% Re-run the final configurations through NetworkSim2 so every final result
-% uses the normal simulation output/export path.
-finalRows = zeros(numel(multiCriteriaAlgorithms),16);
+% Exploratory winners are reported ONLY for Experiment 2.
+jointRows = zeros(numel(multiCriteriaAlgorithms),16);
 for a = 1:numel(multiCriteriaAlgorithms)
     alg = multiCriteriaAlgorithms(a);
     b = optimisationResults.(char(alg));
-    cfg = baseCfg;
-    cfg.algorithm = alg;
-    cfg.weights = b.weights;
-    cfg.hysteresis = b.hysteresis;
-    cfg.plotResults = false;
-    cfg.verbose = false;
+    cfg = set_selector_cfg(baseCfg,alg,b.weights,b.hysteresis);
     r = NetworkSim2(cfg,traceData);
-    finalRows(a,:) = [b.weights,b.hysteresis,r.switches, ...
-        count_ping_pong(r.selectedLog,r.time), ...
-        r.meanSelectedMetrics(1),r.meanSelectedMetrics(2), ...
-        r.meanSelectedMetrics(3),r.meanSelectedMetrics(4), ...
-        r.meanSelectedMetrics(5),r.modelledDataCost_R, ...
-        b.feasible,b.qosViolation];
+    jointRows(a,:) = configuration_row(r,b.weights,b.hysteresis,baseCfg);
 end
-finalConfigurationTable = array2table(finalRows,'VariableNames',{ ...
-    'WeightLatency','WeightPacketLoss','WeightThroughput','WeightSignal', ...
-    'WeightCost','Hysteresis','Handovers','PingPongHandovers', ...
-    'MeanLatency_ms','MeanPacketLoss_percent','MeanThroughput_Mbps', ...
-    'MeanSignalQuality_dB','MeanCost_R_per_MB','TotalDataCost_R', ...
-    'QoSFeasible','QoSViolation'});
-finalConfigurationTable = addvars(finalConfigurationTable, ...
-    multiCriteriaAlgorithms(:),'Before',1,'NewVariableNames','Algorithm');
+jointConfigurationTable = configuration_table(jointRows,multiCriteriaAlgorithms);
+jointConfigurationTable.ConfigurationSource = repmat("Exploratory joint search", ...
+    height(jointConfigurationTable),1);
+writetable(jointConfigurationTable,fullfile(outDir,'joint_optimisation_configuration.csv'));
+
+% Final means, switching, costs and references use the chosen configuration.
+finalRows = zeros(numel(multiCriteriaAlgorithms),16);
+for a = 1:numel(multiCriteriaAlgorithms)
+    cfg = set_selector_cfg(chosenCfg,multiCriteriaAlgorithms(a), ...
+        chosenWeights,chosenHysteresis);
+    r = NetworkSim2(cfg,traceData);
+    finalRows(a,:) = configuration_row(r,chosenWeights,chosenHysteresis,baseCfg);
+end
+finalConfigurationTable = configuration_table(finalRows,multiCriteriaAlgorithms);
+finalConfigurationTable.ConfigurationSource = repmat("Investigator selected", ...
+    height(finalConfigurationTable),1);
+% Includes single-criterion references at the SAME margin and seed.
+policyRows = zeros(numel(algorithms),16);
+for a = 1:numel(algorithms)
+    cfg = set_selector_cfg(chosenCfg,algorithms(a),chosenWeights,chosenHysteresis);
+    r = NetworkSim2(cfg,traceData);
+    policyRows(a,:) = configuration_row(r,chosenWeights,chosenHysteresis,baseCfg);
+    export_single_timeseries(r,algorithms(a),16,'chosen_normal',outDir);
+end
+finalPolicyTable = configuration_table(policyRows,algorithms);
+writetable(finalPolicyTable,fullfile(outDir,'final_policy_comparison.csv'));
 % Explicit baseline-to-final comparison for the main supervisor argument.
 baselineRows = zeros(height(finalConfigurationTable),8);
 for a = 1:height(finalConfigurationTable)
@@ -182,7 +204,7 @@ for a = 1:numel(multiCriteriaAlgorithms)
         sprintf('global_search_%s.csv',char(multiCriteriaAlgorithms(a)))));
 end
 %% Final selected configuration versus independent per-metric references.
-oracleRows = zeros(height(finalConfigurationTable),5);
+oracleRows = zeros(height(finalConfigurationTable),13);
 for a = 1:height(finalConfigurationTable)
     cfg = baseCfg;
     cfg.algorithm = string(finalConfigurationTable.Algorithm(a));
@@ -193,16 +215,28 @@ for a = 1:height(finalConfigurationTable)
         finalConfigurationTable.WeightCost(a)];
     cfg.hysteresis = finalConfigurationTable.Hysteresis(a);
     r = NetworkSim2(cfg,traceData);
+    [signalReference,costReference] = supporting_metric_references(r,cfg);
     oracleRows(a,:) = [ ...
         mean(r.selectedMetricsLog(:,1)),mean(r.selectedMetricsLog(:,2)), ...
         mean(r.selectedMetricsLog(:,3)),mean(r.metricOracleLog(:,1)), ...
-        mean(r.metricOracleLog(:,2))];
+        mean(r.metricOracleLog(:,2)),mean(r.metricOracleLog(:,3)), ...
+        r.oracleMatchRate,r.meanSelectedScore,r.meanOracleScore, ...
+        r.meanSelectedMetrics(4),r.meanSelectedMetrics(5),signalReference,costReference];
 end
 oracleComparisonTable = array2table(oracleRows,'VariableNames',{ ...
     'SelectedLatency_ms','SelectedPacketLoss_percent','SelectedThroughput_Mbps', ...
-    'MetricOracleLatency_ms','MetricOraclePacketLoss_percent'});
+    'MetricOracleLatency_ms','MetricOraclePacketLoss_percent', ...
+    'MetricOracleThroughput_Mbps','ScoreOracleAgreement_percent', ...
+    'MeanSelectedScore','MeanScoreOracleScore','SelectedSignalQuality_dB', ...
+    'SelectedCost_R_per_MB','MetricOracleSignalQuality_dB','MetricOracleCost_R_per_MB'});
 oracleComparisonTable = addvars(oracleComparisonTable, ...
     finalConfigurationTable.Algorithm(:),'Before',1,'NewVariableNames','Algorithm');
+oracleComparisonTable.Hysteresis = repmat(chosenHysteresis,height(oracleComparisonTable),1);
+oracleComparisonTable.WeightLatency = repmat(chosenWeights(1),height(oracleComparisonTable),1);
+oracleComparisonTable.WeightPacketLoss = repmat(chosenWeights(2),height(oracleComparisonTable),1);
+oracleComparisonTable.WeightThroughput = repmat(chosenWeights(3),height(oracleComparisonTable),1);
+oracleComparisonTable.WeightSignal = repmat(chosenWeights(4),height(oracleComparisonTable),1);
+oracleComparisonTable.WeightCost = repmat(chosenWeights(5),height(oracleComparisonTable),1);
 writetable(oracleComparisonTable,fullfile(outDir,'final_oracle_comparison.csv'));
 %% ================================================================
 % 3. RANDOM-WEIGHT ROBUSTNESS
@@ -249,6 +283,7 @@ randomWeightTable.Algorithm = reshape( ...
     multiCriteriaAlgorithms(randomWeightTable.AlgorithmID),[],1);
 randomWeightTable = movevars(randomWeightTable,'Algorithm','Before',1);
 randomWeightTable.AlgorithmID = [];
+randomWeightTable.Hysteresis = repmat(chosenHysteresis,height(randomWeightTable),1);
 writetable(randomWeightTable,fullfile(outDir,'random_weight_sensitivity.csv'));
 %% ================================================================
 % 4. CONTROLLED NETWORK-DEGRADATION SCENARIOS + TIME SERIES
@@ -296,9 +331,15 @@ scenarioTable.Algorithm = reshape(multiCriteriaAlgorithms(scenarioTable.Algorith
 scenarioTable = movevars(scenarioTable,{'Scenario','Algorithm'},'Before',1);
 scenarioTable.ScenarioID = [];
 scenarioTable.AlgorithmID = [];
+scenarioTable.Hysteresis = repmat(chosenHysteresis,height(scenarioTable),1);
+scenarioTable.WeightLatency = repmat(chosenWeights(1),height(scenarioTable),1);
+scenarioTable.WeightPacketLoss = repmat(chosenWeights(2),height(scenarioTable),1);
+scenarioTable.WeightThroughput = repmat(chosenWeights(3),height(scenarioTable),1);
+scenarioTable.WeightSignal = repmat(chosenWeights(4),height(scenarioTable),1);
+scenarioTable.WeightCost = repmat(chosenWeights(5),height(scenarioTable),1);
 writetable(scenarioTable,fullfile(outDir,'degradation_scenarios_summary.csv'));
 export_saw_topsis_timeseries(baseCfg,traceData,outDir,finalConfigurationTable);
-generate_degradation_timeseries_plots(outDir,scenarioNames);
+% Degradation figures are generated by generate_report_plots.
 %% ================================================================
 % 5. SINGLE-CRITERION THRESHOLD SENSITIVITY
 % ================================================================
@@ -316,7 +357,8 @@ for cidx = 1:numel(criterionNames)
     for v = 1:numel(values)
         cfg = baseCfg;
         cfg.algorithm = alg;
-        cfg.hysteresis = 0;
+        cfg.weights = chosenWeights;
+        cfg.hysteresis = chosenHysteresis;
         switch alg
             case "Throughput",    cfg.threshold.throughput_Mbps = values(v);
             case "Latency",       cfg.threshold.latency_ms = values(v);
@@ -340,8 +382,14 @@ thresholdTable = array2table(thresholdRows,'VariableNames',{ ...
 thresholdTable.Criterion = reshape(criterionNames(thresholdTable.CriterionID),[],1);
 thresholdTable = movevars(thresholdTable,'Criterion','Before',1);
 thresholdTable.CriterionID = [];
+thresholdTable.Hysteresis = repmat(chosenHysteresis,height(thresholdTable),1);
+thresholdTable.WeightLatency = repmat(chosenWeights(1),height(thresholdTable),1);
+thresholdTable.WeightPacketLoss = repmat(chosenWeights(2),height(thresholdTable),1);
+thresholdTable.WeightThroughput = repmat(chosenWeights(3),height(thresholdTable),1);
+thresholdTable.WeightSignal = repmat(chosenWeights(4),height(thresholdTable),1);
+thresholdTable.WeightCost = repmat(chosenWeights(5),height(thresholdTable),1);
 writetable(thresholdTable,fullfile(outDir,'single_criterion_threshold_sensitivity.csv'));
-generate_threshold_plot(thresholdTable);
+% Threshold figures are generated by generate_report_plots.
 %% ================================================================
 % 6. RANDOM-SEED ROBUSTNESS OF FINAL SAW/TOPSIS CONFIGURATIONS
 % ================================================================
@@ -374,6 +422,12 @@ seedTable = array2table(seedRows,'VariableNames',{ ...
 seedTable.Algorithm = reshape(multiCriteriaAlgorithms(seedTable.AlgorithmID),[],1);
 seedTable = movevars(seedTable,'Algorithm','Before',1);
 seedTable.AlgorithmID = [];
+seedTable.Hysteresis = repmat(chosenHysteresis,height(seedTable),1);
+seedTable.WeightLatency = repmat(chosenWeights(1),height(seedTable),1);
+seedTable.WeightPacketLoss = repmat(chosenWeights(2),height(seedTable),1);
+seedTable.WeightThroughput = repmat(chosenWeights(3),height(seedTable),1);
+seedTable.WeightSignal = repmat(chosenWeights(4),height(seedTable),1);
+seedTable.WeightCost = repmat(chosenWeights(5),height(seedTable),1);
 writetable(seedTable,fullfile(outDir,'random_seed_robustness.csv'));
 summaryRows = [];
 for a = 1:numel(multiCriteriaAlgorithms)
@@ -393,15 +447,22 @@ summaryTable = array2table(summaryRows,'VariableNames',{ ...
     'TotalDataCost_Mean_R','TotalDataCost_SD_R'});
 summaryTable = addvars(summaryTable,multiCriteriaAlgorithms(:), ...
     'Before',1,'NewVariableNames','Algorithm');
+summaryTable.Hysteresis = repmat(chosenHysteresis,height(summaryTable),1);
+summaryTable.WeightLatency = repmat(chosenWeights(1),height(summaryTable),1);
+summaryTable.WeightPacketLoss = repmat(chosenWeights(2),height(summaryTable),1);
+summaryTable.WeightThroughput = repmat(chosenWeights(3),height(summaryTable),1);
+summaryTable.WeightSignal = repmat(chosenWeights(4),height(summaryTable),1);
+summaryTable.WeightCost = repmat(chosenWeights(5),height(summaryTable),1);
 writetable(summaryTable,fullfile(outDir,'random_seed_summary.csv'));
 %% ================================================================
 % 7. HYSTERESIS OPTIMISATION WITH CONTEXT-CHOSEN FIXED WEIGHTS
 % ================================================================
-fprintf('\n[7/7] Fixed-weight hysteresis optimisation...\n');
-fixedWeights = [0.30 0.30 0.20 0.10 0.10];
+fprintf('\n[7/7] Fixed-weight hysteresis sensitivity; chosen M = %.2f...\n',chosenHysteresis);
+fixedWeights = chosenWeights;
 fixedAlgorithms = ["SAW","TOPSIS"];
 fixedHValues = 0:baseCfg.optimization.hysteresisStep: ...
                  baseCfg.optimization.maxHysteresis;
+fixedHValues = unique([fixedHValues chosenHysteresis]);
 fixedRows = zeros(numel(fixedAlgorithms)*numel(fixedHValues),9);
 row = 0;
 for a = 1:numel(fixedAlgorithms)
@@ -444,129 +505,43 @@ fixedHysteresisTable.AlgorithmID = [];
 fixedHysteresisTable = movevars( ...
     fixedHysteresisTable,'Algorithm','Before',1);
 fixedHysteresisTable.Selected = false(height(fixedHysteresisTable),1);
-%% Select the optimal tested hysteresis independently for each method
-for a = 1:numel(fixedAlgorithms)
-    methodRows = fixedHysteresisTable( ...
-        fixedHysteresisTable.Algorithm==fixedAlgorithms(a),:);
-    feasibleRows = logical(methodRows.QoSFeasible);
-    if any(feasibleRows)
-        candidates = methodRows(feasibleRows,:);
-    else
-        % No feasible setting: first minimise QoS constraint violation.
-        minViolation = min(methodRows.QoSViolation);
-        candidates = methodRows( ...
-            methodRows.QoSViolation==minViolation,:);
-        warning('No feasible fixed-weight hysteresis for %s.', ...
-                char(fixedAlgorithms(a)));
-    end
-    % Lexicographic ranking; higher capacity is preferred.
-    % Lowest hysteresis resolves any remaining exact tie.
-    candidates = sortrows(candidates, ...
-        {'QoSViolation','PingPongHandovers','Handovers', ...
-         'MeanLatency_ms','MeanPacketLoss_percent', ...
-         'MeanThroughput_Mbps','Hysteresis'}, ...
-        {'ascend','ascend','ascend','ascend','ascend','descend','ascend'});
-    best = candidates(1,:);
-    selectedIdx = ...
-        fixedHysteresisTable.Algorithm==fixedAlgorithms(a) & ...
-        abs(fixedHysteresisTable.Hysteresis-best.Hysteresis)<1e-10;
-    fixedHysteresisTable.Selected(selectedIdx) = true;
-    fprintf(['  %s | H=%.2f | feasible=%d | ping-pong=%d | ' ...
-             'handovers=%d | latency=%.2f ms | loss=%.2f%% | ' ...
-             'capacity=%.2f Mbps\n'], ...
-        char(fixedAlgorithms(a)),best.Hysteresis,best.QoSFeasible, ...
-        best.PingPongHandovers,best.Handovers,best.MeanLatency_ms, ...
-        best.MeanPacketLoss_percent,best.MeanThroughput_Mbps);
-end
-fixedHysteresisBest = fixedHysteresisTable( ...
-    fixedHysteresisTable.Selected,:);
+% Selection is the investigator's decision, not the stability-first optimum.
+fixedHysteresisTable.Selected = abs( ...
+    fixedHysteresisTable.Hysteresis-chosenHysteresis) < 1e-10;
+fixedHysteresisBest = fixedHysteresisTable(fixedHysteresisTable.Selected,:);
+assert(height(fixedHysteresisBest)==numel(fixedAlgorithms), ...
+    'Expected one investigator-selected sweep point per method.');
 writetable(fixedHysteresisTable, ...
     fullfile(outDir,'fixed_weight_hysteresis_sensitivity.csv'));
 writetable(fixedHysteresisBest, ...
-    fullfile(outDir,'fixed_weight_optimal_hysteresis.csv'));
-%% Plot sensitivity and mark selected settings
-fixedFigDir = fullfile(outDir,'report_figures');
-if ~exist(fixedFigDir,'dir')
-    mkdir(fixedFigDir);
-end
-fFixed = figure( ...
-    'Name','Fixed-Weight Hysteresis Experiment', ...
-    'Position',[100 100 1100 850]);
-fields = {
-    'PingPongHandovers'
-    'Handovers'
-    'MeanLatency_ms'
-    'MeanPacketLoss_percent'
-    'MeanThroughput_Mbps'
-};
-labels = {
-    'Ping-pong returns'
-    'Total handovers'
-    'Mean latency (ms)'
-    'Mean modelled packet loss (%)'
-    'Mean estimated capacity (Mbps)'
-};
-styles = {'o-','s--'};
-for panel = 1:numel(fields)
-    subplot(3,2,panel);
-    hold on;
-    for a = 1:numel(fixedAlgorithms)
-        t = fixedHysteresisTable( ...
-            fixedHysteresisTable.Algorithm==fixedAlgorithms(a),:);
-        t = sortrows(t,'Hysteresis');
-        selected = t(logical(t.Selected),:);
-        p = plot(t.Hysteresis,t.(fields{panel}),styles{a}, ...
-            'LineWidth',1.3, ...
-            'DisplayName',char(fixedAlgorithms(a)));
-        % Highlight the selected tested point.
-        plot(selected.Hysteresis,selected.(fields{panel}), ...
-            'p','MarkerSize',13,'MarkerFaceColor',p.Color, ...
-            'MarkerEdgeColor','k','HandleVisibility','off');
-        xline(selected.Hysteresis,':', ...
-            'Color',p.Color,'HandleVisibility','off');
-    end
-    % Show the study's absolute QoS limits.
-    switch panel
-        case 3
-            yline(baseCfg.qosLimits.maxLatency_ms,'k--', ...
-                'Latency limit','HandleVisibility','off');
-        case 4
-            yline(baseCfg.qosLimits.maxPacketLoss_percent,'k--', ...
-                'Loss limit','HandleVisibility','off');
-        case 5
-            yline(baseCfg.qosLimits.minThroughput_Mbps,'k--', ...
-                'Capacity minimum','HandleVisibility','off');
-    end
-    xlabel('Hysteresis margin');
-    ylabel(labels{panel});
-    legend('Location','best');
-    grid on;
-end
-figure(fFixed);
-subplot(3,2,6);
-axis off;
-summaryText = sprintf( ...
-    ['Fixed weights [L, P, T, Q, C]:\n' ...
-     '[0.30, 0.30, 0.20, 0.10, 0.10]\n\n' ...
-     'Normal scenario; common seed = 16\n' ...
-     'Stars mark selected settings.\n\n']);
+    fullfile(outDir,'fixed_weight_selected_hysteresis.csv'));
+% Selected slice must reproduce the final normal-scenario evaluation.
 for a = 1:numel(fixedAlgorithms)
-    best = fixedHysteresisBest( ...
-        fixedHysteresisBest.Algorithm==fixedAlgorithms(a),:);
-    summaryText = [summaryText, sprintf( ...
-        '%s: selected H = %.2f; feasible = %d\n', ...
-        char(fixedAlgorithms(a)),best.Hysteresis,best.QoSFeasible)]; %#ok<AGROW>
+    f = finalConfigurationTable(string(finalConfigurationTable.Algorithm)==fixedAlgorithms(a),:);
+    h = fixedHysteresisBest(string(fixedHysteresisBest.Algorithm)==fixedAlgorithms(a),:);
+    assert(abs(f.MeanLatency_ms-h.MeanLatency_ms)<1e-9 && ...
+           abs(f.MeanPacketLoss_percent-h.MeanPacketLoss_percent)<1e-9 && ...
+           abs(f.MeanThroughput_Mbps-h.MeanThroughput_Mbps)<1e-9 && ...
+           f.Handovers==h.Handovers && f.PingPongHandovers==h.PingPongHandovers, ...
+           'Final evaluation and selected Experiment 7 point differ.');
 end
-text(0,0.95,summaryText, ...
-    'Units','normalized','VerticalAlignment','top','FontSize',10);
-sgtitle('Hysteresis Sensitivity with Latency/Loss-Prioritised Weights');
-saveas(fFixed,fullfile(fixedFigDir, ...
-    'Fixed_Weight_Hysteresis_Optimisation.png'));
+% Persist provenance: plotting rejects old joint-search final outputs.
+metadata = table("chosen_fixed_weights_v1",chosenHysteresis,16, ...
+    chosenWeights(1),chosenWeights(2),chosenWeights(3), ...
+    chosenWeights(4),chosenWeights(5),0.35,0.75,0.70, ...
+    'VariableNames',{'ConfigurationFamily','Hysteresis','CommonSeed', ...
+    'WeightLatency','WeightPacketLoss','WeightThroughput','WeightSignal', ...
+    'WeightCost','DegradationStartFraction','DegradationEndFraction', ...
+    'DegradationSeverity'});
+writetable(metadata,fullfile(outDir,'experiment_metadata.csv'));
 %% Save complete results
 experimentResults = struct();
 experimentResults.algorithmComparison = algorithmTable;
 experimentResults.optimisationResults = optimisationResults;
+experimentResults.jointOptimisationConfiguration = jointConfigurationTable;
 experimentResults.finalConfiguration = finalConfigurationTable;
+experimentResults.finalPolicyComparison = finalPolicyTable;
+experimentResults.metadata = metadata;
 experimentResults.baselineVsFinal = baselineFinalTable;
 experimentResults.finalOracleComparison = oracleComparisonTable;
 experimentResults.randomWeights = randomWeightTable;
@@ -576,11 +551,9 @@ experimentResults.randomSeeds = seedTable;
 experimentResults.randomSeedSummary = summaryTable;
 experimentResults.baseline = baseline;
 experimentResults.fixedWeightHysteresis = fixedHysteresisTable;
-experimentResults.fixedWeightOptimalHysteresis = fixedHysteresisBest;
+experimentResults.fixedWeightSelectedHysteresis = fixedHysteresisBest;
 save(fullfile(outDir,'experimentResults.mat'),'experimentResults');
-if exist('generate_report_plots','file') == 2
-    generate_report_plots();
-end
+generate_report_plots(outDir);
 
 fprintf('\n====================================================\n');
 fprintf(' EXPERIMENTS COMPLETE\n');
@@ -836,37 +809,44 @@ cfg.plotResults = false;
 cfg.verbose = false;
 end
 %% ========================================================================
-function generate_threshold_plot(t)
-figure('Name','Single-Criterion Threshold Sensitivity');
-methods=unique(t.Criterion,'stable');
-for i=1:numel(methods)
-    idx=t.Criterion==methods(i);
-    plot(t.Threshold(idx),t.Handovers(idx),'o-','LineWidth',1.2, ...
-        'DisplayName',char(methods(i))); hold on;
+function row = configuration_row(r,weights,hysteresis,cfg)
+lat = r.meanSelectedMetrics(1);
+loss = r.meanSelectedMetrics(2);
+thr = r.meanSelectedMetrics(3);
+feasible = lat <= cfg.qosLimits.maxLatency_ms && ...
+    loss <= cfg.qosLimits.maxPacketLoss_percent && ...
+    thr >= cfg.qosLimits.minThroughput_Mbps;
+violation = max(0,lat/cfg.qosLimits.maxLatency_ms-1) + ...
+    max(0,loss/cfg.qosLimits.maxPacketLoss_percent-1) + ...
+    max(0,cfg.qosLimits.minThroughput_Mbps/max(thr,eps)-1);
+row = [weights,hysteresis,r.switches,count_ping_pong(r.selectedLog,r.time), ...
+    r.meanSelectedMetrics,r.modelledDataCost_R,feasible,violation];
 end
-xlabel('Threshold value'); ylabel('Handovers');
-legend('Location','best'); title('Single-Criterion Threshold Sensitivity'); grid on;
+
+function t = configuration_table(rows,algorithms)
+t = array2table(rows,'VariableNames',{ ...
+    'WeightLatency','WeightPacketLoss','WeightThroughput','WeightSignal', ...
+    'WeightCost','Hysteresis','Handovers','PingPongHandovers', ...
+    'MeanLatency_ms','MeanPacketLoss_percent','MeanThroughput_Mbps', ...
+    'MeanSignalQuality_dB','MeanCost_R_per_MB','TotalDataCost_R', ...
+    'QoSFeasible','QoSViolation'});
+t = addvars(t,algorithms(:),'Before',1,'NewVariableNames','Algorithm');
 end
-%% ========================================================================
-function generate_degradation_timeseries_plots(outDir,scenarioNames)
-figDir=fullfile(outDir,'report_figures');
-if ~exist(figDir,'dir'), mkdir(figDir); end
-sawVars={'SAW_Latency_ms','SAW_PacketLoss_percent','SAW_Throughput_Mbps'};
-topVars={'TOPSIS_Latency_ms','TOPSIS_PacketLoss_percent','TOPSIS_Throughput_Mbps'};
-yLabels={'Latency (ms)','Packet loss (%)','Throughput (Mbps)'};
-for s=1:numel(scenarioNames)
-    filename=fullfile(outDir,sprintf('SAW_vs_TOPSIS_timeseries_%s.csv',char(scenarioNames(s))));
-    T=readtable(filename);
-    f=figure('Name',['Degradation - ',char(scenarioNames(s))], ...
-        'Position',[100 100 900 700]);
-    for m=1:3
-        subplot(3,1,m);
-        plot(T.Time_s,T.(sawVars{m}),'LineWidth',1.2,'DisplayName','SAW'); hold on;
-        plot(T.Time_s,T.(topVars{m}),'--','LineWidth',1.2,'DisplayName','TOPSIS');
-        ylabel(yLabels{m}); grid on; legend('Location','best');
-        if m==1, title(['Degradation scenario: ',char(scenarioNames(s))]); end
-        if m==3, xlabel('Time (s)'); end
+
+function [signalReference,costReference] = supporting_metric_references(r,cfg)
+% Match NetworkSim2's availability rule; terrestrial cellular/satellite links
+% remain available. Signal is still a mixed-unit model criterion.
+count = numel(r.time);
+refs = zeros(count,2);
+for k=1:count
+    available = true(4,1);
+    if cfg.wifi.enforceCoverage
+        position = [r.xPos(k) r.yPos(k) 1.5];
+        available(1) = norm(position-cfg.wifi.apPos) <= cfg.wifi.radius_m;
     end
-    saveas(f,fullfile(figDir,['Degradation_',char(scenarioNames(s)),'.png']));
+    metrics = squeeze(r.metricsLog(k,:,:));
+    refs(k,:) = [max(metrics(available,4)),min(metrics(available,5))];
 end
+signalReference = mean(refs(:,1));
+costReference = mean(refs(:,2));
 end
