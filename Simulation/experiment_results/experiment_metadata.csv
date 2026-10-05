@@ -1,0 +1,2 @@
+ConfigurationFamily,Hysteresis,CommonSeed,WeightLatency,WeightPacketLoss,WeightThroughput,WeightSignal,WeightCost,DegradationStartFraction,DegradationEndFraction,DegradationSeverity
+chosen_fixed_weights_v1,0.08,16,0.3,0.3,0.2,0.1,0.1,0.35,0.75,0.7

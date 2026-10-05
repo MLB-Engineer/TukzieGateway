@@ -1,0 +1,3 @@
+Algorithm,BaselineHandovers,BaselinePingPongHandovers,FinalHandovers,FinalPingPongHandovers,BaselineLatency_ms,FinalLatency_ms,BaselinePacketLoss_percent,FinalPacketLoss_percent,PingPongReductionPercent
+SAW,62,30,42,16,14.9997975432084,16.6713367109171,15.0150943433689,6.78318959196092,46.6666666666667
+TOPSIS,57,26,42,16,13.7419811164096,16.2081384504071,23.9572359080031,8.46906017669892,38.4615384615385
