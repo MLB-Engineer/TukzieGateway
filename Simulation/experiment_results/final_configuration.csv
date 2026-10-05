@@ -1,3 +1,0 @@
-Algorithm,SelectedWeightProfile,WeightLatency,WeightPacketLoss,WeightThroughput,WeightSignal,WeightCost,Hysteresis,Handovers,MeanLatency_ms,MeanPacketLoss_percent,MeanThroughput_Mbps,MeanSignalQuality_dB,TotalDataCost_R,CoreQoSScore,FinalAssessmentScore
-SAW,ThroughputFocus,0.1,0.1,0.55,0.15,0.1,0.06,29,15.7076140134695,11.0232812164723,131.821498688538,-10.3347952884248,13230.840659669,0.72660542074557,0.75
-TOPSIS,LossFocus,0.15,0.6,0.05,0.1,0.1,0.12,41,19.277840335314,2.62224850000318,122.64441332267,-9.97526975094307,25309.5971185101,0.500646456133915,0.25
